@@ -2,16 +2,15 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
-	"time"
 
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"github.com/tektoncd/pipeline/pkg/client/clientset/versioned"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
@@ -26,6 +25,12 @@ func main() {
 	tektonClient, err := versioned.NewForConfig(config)
 	if err != nil {
 		log.Fatalf("Error creating Tekton client: %v", err)
+	}
+
+	// Create Kubernetes client
+	kubeClient, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		log.Fatalf("Error creating Kubernetes client: %v", err)
 	}
 
 	targetNamespace := "default"
@@ -44,12 +49,6 @@ func main() {
 			},
 		},
 	}
-
-	taskJson, err := json.Marshal(task)
-	if err != nil {
-		log.Fatalf("Error marshaling Task: %v", err)
-	}
-	fmt.Println(string(taskJson))
 
 	ctx := context.Background()
 
@@ -84,43 +83,52 @@ func main() {
 
 	fmt.Printf("TaskRun %s created successfully.\n", createdTaskRun.Name)
 
-	err = waitForTaskRunCompletion(ctx, tektonClient, targetNamespace, createdTaskRun.Name)
-	if err != nil {
-		log.Fatalf("Error waiting for TaskRun completion: %v", err)
-	}
-
-	podName, err := getPodNameFromTaskRun(ctx, tektonClient, targetNamespace, createdTaskRun.Name)
-	if err != nil {
-		log.Fatalf("Error getting Pod name from TaskRun: %v", err)
-	}
-
-	fmt.Printf("Pod name: %s\n", podName)
-}
-
-func waitForTaskRunCompletion(ctx context.Context, tektonClient versioned.Interface, namespace, taskRunName string) error {
-	return wait.PollImmediateInfinite(1*time.Second, func() (bool, error) {
-		taskRun, err := tektonClient.TektonV1().TaskRuns(namespace).Get(ctx, taskRunName, metav1.GetOptions{})
-		if err != nil {
-			return false, err
-		}
-
-		if taskRun.IsDone() {
-			return true, nil
-		}
-
-		return false, nil
+	// Get TaskRun name without waiting for completion
+	taskRunWatcher, err := tektonClient.TektonV1().TaskRuns(targetNamespace).Watch(ctx, metav1.ListOptions{
+		FieldSelector: fmt.Sprintf("metadata.name=%s", createdTaskRun.Name),
 	})
-}
-
-func getPodNameFromTaskRun(ctx context.Context, tektonClient versioned.Interface, namespace, taskRunName string) (string, error) {
-	taskRun, err := tektonClient.TektonV1().TaskRuns(namespace).Get(ctx, taskRunName, metav1.GetOptions{})
 	if err != nil {
-		return "", err
+		log.Fatalf("Error watching TaskRun: %v", err)
 	}
+	defer taskRunWatcher.Stop()
 
-	if len(taskRun.Status.PodName) == 0 {
-		return "", fmt.Errorf("Pod name not found in TaskRun status")
+	// Get Pod name without waiting for completion
+	podWatcher, err := kubeClient.CoreV1().Pods(targetNamespace).Watch(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("tekton.dev/taskRun=%s", createdTaskRun.Name),
+	})
+	if err != nil {
+		log.Fatalf("Error watching Pods: %v", err)
 	}
+	defer podWatcher.Stop()
 
-	return taskRun.Status.PodName, nil
+	var podName string
+	for {
+		select {
+		case event, ok := <-taskRunWatcher.ResultChan():
+			if !ok {
+				log.Println("TaskRun watcher channel closed")
+				return
+			}
+			taskRun, ok := event.Object.(*v1.TaskRun)
+			if !ok {
+				log.Fatalf("Unexpected object type in watcher: %T", event.Object)
+			}
+			fmt.Printf("TaskRun name: %s\n", taskRun.Name)
+
+		case event, ok := <-podWatcher.ResultChan():
+			if !ok {
+				log.Println("Pod watcher channel closed")
+				return
+			}
+			pod, ok := event.Object.(*corev1.Pod)
+			if !ok {
+				log.Fatalf("Unexpected object type in watcher: %T", event.Object)
+			}
+			podName = pod.Name
+			fmt.Printf("Pod name: %s\n", podName)
+			if podName != "" {
+				return
+			}
+		}
+	}
 }
