@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"github.com/tektoncd/pipeline/pkg/client/clientset/versioned"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
@@ -51,11 +53,74 @@ func main() {
 
 	ctx := context.Background()
 
-	// Register the task in the default namespace
-	_, err = tektonClient.TektonV1().Tasks(targetNamespace).Create(ctx, task, metav1.CreateOptions{})
+	_, err = tektonClient.TektonV1().Tasks(targetNamespace).Get(ctx, task.Name, metav1.GetOptions{})
 	if err != nil {
-		log.Fatalf("Error creating Task in namespace %s: %v", targetNamespace, err)
+		_, err = tektonClient.TektonV1().Tasks(targetNamespace).Create(ctx, task, metav1.CreateOptions{})
+		if err != nil {
+			log.Fatalf("Error creating Task in namespace %s: %v", targetNamespace, err)
+		}
+		fmt.Println("Task created successfully.")
+	} else {
+		fmt.Println("Task already exists, skipping creation.")
 	}
 
-	fmt.Println("Task created successfully.")
+	// Create a TaskRun
+	taskRun := &v1.TaskRun{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "hello-world-run-",
+			Namespace:    targetNamespace,
+		},
+		Spec: v1.TaskRunSpec{
+			TaskRef: &v1.TaskRef{
+				Name: task.Name,
+			},
+		},
+	}
+
+	createdTaskRun, err := tektonClient.TektonV1().TaskRuns(targetNamespace).Create(ctx, taskRun, metav1.CreateOptions{})
+	if err != nil {
+		log.Fatalf("Error creating TaskRun: %v", err)
+	}
+
+	fmt.Printf("TaskRun %s created successfully.\n", createdTaskRun.Name)
+
+	err = waitForTaskRunCompletion(ctx, tektonClient, targetNamespace, createdTaskRun.Name)
+	if err != nil {
+		log.Fatalf("Error waiting for TaskRun completion: %v", err)
+	}
+
+	podName, err := getPodNameFromTaskRun(ctx, tektonClient, targetNamespace, createdTaskRun.Name)
+	if err != nil {
+		log.Fatalf("Error getting Pod name from TaskRun: %v", err)
+	}
+
+	fmt.Printf("Pod name: %s\n", podName)
+}
+
+func waitForTaskRunCompletion(ctx context.Context, tektonClient versioned.Interface, namespace, taskRunName string) error {
+	return wait.PollImmediateInfinite(1*time.Second, func() (bool, error) {
+		taskRun, err := tektonClient.TektonV1().TaskRuns(namespace).Get(ctx, taskRunName, metav1.GetOptions{})
+		if err != nil {
+			return false, err
+		}
+
+		if taskRun.IsDone() {
+			return true, nil
+		}
+
+		return false, nil
+	})
+}
+
+func getPodNameFromTaskRun(ctx context.Context, tektonClient versioned.Interface, namespace, taskRunName string) (string, error) {
+	taskRun, err := tektonClient.TektonV1().TaskRuns(namespace).Get(ctx, taskRunName, metav1.GetOptions{})
+	if err != nil {
+		return "", err
+	}
+
+	if len(taskRun.Status.PodName) == 0 {
+		return "", fmt.Errorf("Pod name not found in TaskRun status")
+	}
+
+	return taskRun.Status.PodName, nil
 }
