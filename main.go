@@ -22,8 +22,9 @@ type Config struct {
 }
 
 type Output struct {
-	TaskRunName string `json:"taskRunName"`
-	PodName     string `json:"podName"`
+	TargetNamespace string `json:"targetNamespace"`
+	TaskRunName     string `json:"taskRunName"`
+	PodName         string `json:"podName"`
 }
 
 func main() {
@@ -79,16 +80,21 @@ func main() {
 
 	ctx := context.Background()
 
-	_, err = tektonClient.TektonV1().Tasks(targetNamespace).Get(ctx, task.Name, metav1.GetOptions{})
-	if err != nil {
-		_, err = tektonClient.TektonV1().Tasks(targetNamespace).Create(ctx, task, metav1.CreateOptions{})
+	// Delete the existing Task if it exists
+	existingTask, err := tektonClient.TektonV1().Tasks(targetNamespace).Get(ctx, task.Name, metav1.GetOptions{})
+	if err == nil {
+		err = tektonClient.TektonV1().Tasks(targetNamespace).Delete(ctx, existingTask.Name, metav1.DeleteOptions{})
 		if err != nil {
-			log.Fatalf("Error creating Task in namespace %s: %v", targetNamespace, err)
+			log.Fatalf("Error deleting existing Task in namespace %s: %v", targetNamespace, err)
 		}
-		fmt.Println("Task created successfully.")
-	} else {
-		fmt.Println("Task already exists, skipping creation.")
+		fmt.Println("Existing Task deleted successfully.")
 	}
+
+	_, err = tektonClient.TektonV1().Tasks(targetNamespace).Create(ctx, task, metav1.CreateOptions{})
+	if err != nil {
+		log.Fatalf("Error creating Task in namespace %s: %v", targetNamespace, err)
+	}
+	fmt.Println("Task created successfully.")
 
 	// Create a TaskRun
 	taskRun := &v1.TaskRun{
@@ -129,6 +135,7 @@ func main() {
 	defer podWatcher.Stop()
 
 	var output Output
+	output.TargetNamespace = targetNamespace
 	for {
 		select {
 		case event, ok := <-taskRunWatcher.ResultChan():
