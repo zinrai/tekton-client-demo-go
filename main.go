@@ -22,9 +22,10 @@ type Config struct {
 }
 
 type Output struct {
-	TargetNamespace string `json:"targetNamespace"`
-	TaskRunName     string `json:"taskRunName"`
-	PodName         string `json:"podName"`
+	TargetNamespace string      `json:"targetNamespace"`
+	TaskRunName     string      `json:"taskRunName"`
+	PodName         string      `json:"podName"`
+	PodStartTime    metav1.Time `json:"podStartTime"`
 }
 
 func main() {
@@ -159,6 +160,7 @@ func main() {
 				log.Fatalf("Unexpected object type in watcher: %T", event.Object)
 			}
 			output.PodName = pod.Name
+			output.PodStartTime = pod.CreationTimestamp
 			if output.PodName != "" {
 				outputJSON, err := json.Marshal(output)
 				if err != nil {
