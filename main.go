@@ -60,14 +60,18 @@ func main() {
 
 	task := &v1.Task{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "hello-world",
+			Name: "random-strings",
 		},
 		Spec: v1.TaskSpec{
 			Steps: []v1.Step{
 				{
-					Name:   "hello-world",
-					Image:  "busybox",
-					Script: "echo 'Hello World'",
+					Name:  "random-strings",
+					Image: "busybox:1.36.1-uclibc",
+					Command: []string{
+						"/bin/sh",
+						"-c",
+						fmt.Sprintf("for i in $(seq 1 %d);   do cat /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c %d; echo; done", 100, 80),
+					},
 				},
 			},
 		},
@@ -89,7 +93,7 @@ func main() {
 	// Create a TaskRun
 	taskRun := &v1.TaskRun{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: "hello-world-run-",
+			GenerateName: "random-strings-run-",
 			Namespace:    targetNamespace,
 		},
 		Spec: v1.TaskRunSpec{
