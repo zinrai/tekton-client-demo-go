@@ -7,6 +7,8 @@ import (
 	"log"
 	"os"
 
+	"gopkg.in/yaml.v2"
+
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"github.com/tektoncd/pipeline/pkg/client/clientset/versioned"
 	corev1 "k8s.io/api/core/v1"
@@ -14,6 +16,10 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 )
+
+type Config struct {
+	TargetNamespace string `yaml:"targetNamespace"`
+}
 
 type Output struct {
 	TaskRunName string `json:"taskRunName"`
@@ -39,7 +45,18 @@ func main() {
 		log.Fatalf("Error creating Kubernetes client: %v", err)
 	}
 
-	targetNamespace := "default"
+	configData, err := os.ReadFile("config.yaml")
+	if err != nil {
+		log.Fatalf("Error reading config file: %v", err)
+	}
+
+	var cfg Config
+	err = yaml.Unmarshal(configData, &cfg)
+	if err != nil {
+		log.Fatalf("Error unmarshaling config data: %v", err)
+	}
+
+	targetNamespace := cfg.TargetNamespace
 
 	task := &v1.Task{
 		ObjectMeta: metav1.ObjectMeta{
