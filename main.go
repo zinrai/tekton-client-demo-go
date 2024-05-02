@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -13,6 +14,11 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 )
+
+type Output struct {
+	TaskRunName string `json:"taskRunName"`
+	PodName     string `json:"podName"`
+}
 
 func main() {
 	kubeconfig := os.Getenv("HOME") + "/.kube/config"
@@ -101,7 +107,7 @@ func main() {
 	}
 	defer podWatcher.Stop()
 
-	var podName string
+	var output Output
 	for {
 		select {
 		case event, ok := <-taskRunWatcher.ResultChan():
@@ -113,7 +119,7 @@ func main() {
 			if !ok {
 				log.Fatalf("Unexpected object type in watcher: %T", event.Object)
 			}
-			fmt.Printf("TaskRun name: %s\n", taskRun.Name)
+			output.TaskRunName = taskRun.Name
 
 		case event, ok := <-podWatcher.ResultChan():
 			if !ok {
@@ -124,9 +130,13 @@ func main() {
 			if !ok {
 				log.Fatalf("Unexpected object type in watcher: %T", event.Object)
 			}
-			podName = pod.Name
-			fmt.Printf("Pod name: %s\n", podName)
-			if podName != "" {
+			output.PodName = pod.Name
+			if output.PodName != "" {
+				outputJSON, err := json.Marshal(output)
+				if err != nil {
+					log.Fatalf("Error marshaling output: %v", err)
+				}
+				fmt.Println(string(outputJSON))
 				return
 			}
 		}
