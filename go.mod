@@ -1,4 +1,4 @@
-module github.com/zinrai/tekton-client-demo-go
+module github.com/zinrai/tekton-task-run-creator
 
 go 1.22.0
 
