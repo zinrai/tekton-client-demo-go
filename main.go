@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	"gopkg.in/yaml.v2"
 
@@ -47,7 +48,15 @@ func main() {
 		log.Fatalf("Error creating Kubernetes client: %v", err)
 	}
 
-	configData, err := os.ReadFile("config.yaml")
+	// Get the directory path of the executable
+	exePath, err := os.Executable()
+	if err != nil {
+		log.Fatalf("Error getting executable path: %v", err)
+	}
+	exeDir := filepath.Dir(exePath)
+
+	configFilePath := filepath.Join(exeDir, "config.yaml")
+	configData, err := os.ReadFile(configFilePath)
 	if err != nil {
 		log.Fatalf("Error reading config file: %v", err)
 	}
